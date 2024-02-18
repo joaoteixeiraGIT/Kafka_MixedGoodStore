@@ -1,0 +1,133 @@
+version: '3'
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:6.2.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  broker:
+    image: confluentinc/cp-kafka:6.2.0
+    container_name: broker
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://:9094,OUTSIDE://localhost:9092
+      KAFKA_LISTENERS: INSIDE://:9094,OUTSIDE://:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:latest
+    container_name: schema-registry
+    depends_on:
+      - zookeeper
+      - broker
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: "broker:9094"
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_TOPIC : "_schemas"
+      SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
+
+  connect:
+    image: confluentinc/cp-kafka-connect:6.2.1
+    container_name: mysql-connector
+    ports:
+      - "8082:8082"
+    depends_on:
+      - broker
+      - schema-registry
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "broker:9094"
+      CONNECT_REST_PORT: 8082 
+      CONNECT_GROUP_ID: "mysql" 
+      CONNECT_CONFIG_STORAGE_TOPIC: "mysql-config" 
+      CONNECT_OFFSET_STORAGE_TOPIC : "mysql-offsets" 
+      CONNECT_STATUS_STORAGE_TOPIC : "mysql-status" 
+      CONNECT_KEY_CONVERTER : org.apache.kafka.connect.storage.StringConverter #posodobljeno za vajo 8
+      CONNECT_VALUE_CONVERTER : "io.confluent.connect.avro.AvroConverter" 
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081" 
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL : "http://schema-registry:8081" 
+      CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter" 
+      CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter" 
+      CONNECT_REST_ADVERTISED_HOST_NAME: "localhost"
+      CONNECT_PLUGIN_PATH: '/etc/kafka-connect/jars'
+     # command: bash -c "confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:latest"
+    volumes:
+        - ./plugins:/etc/kafka-connect/jars
+        - ./mysql-connector-java-8.0.20.jar:/etc/kafka-connect/jars/mysql-connector-java-8.0.20.jar
+        
+  ksqldb-server:
+    image: confluentinc/ksqldb-server:latest
+    hostname: ksqldb-server
+    container_name: ksqldb-server
+    depends_on:
+      - broker
+      - schema-registry
+    ports:
+      - "8088:8088"
+    environment:
+      KSQL_LISTENERS: "http://0.0.0.0:8088"
+      KSQL_BOOTSTRAP_SERVERS: "broker:9094"
+      KSQL_KSQL_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      KSQL_KSQL_KEY_CONVERTER: org.apache.kafka.connect.storage.IntegerConverter
+      KSQL_KSQL_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      KSQL_KSQL_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: "true"
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: "true"
+
+  ksqldb-cli:
+    image: confluentinc/ksqldb-cli:latest
+    container_name: ksqldb-cli
+    depends_on:
+      - ksqldb-server
+    entrypoint: /bin/sh
+    tty: true
+
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.16.0
+    container_name: elasticsearch
+    environment:
+      - node.name=es01
+      - cluster.name=es-docker-cluster
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data01:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.16.0
+    container_name: kibana
+    ports:
+      - 5601:5601
+    environment:
+      ELASTICSEARCH_URL: http://es01:9200
+      ELASTICSEARCH_HOSTS: '["http://es01:9200"]'
+
+volumes:
+  data01:
+    driver: local
+
+
+  
+
+  
